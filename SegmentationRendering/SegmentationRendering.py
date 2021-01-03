@@ -266,6 +266,10 @@ def makeVectorVolume(segmentationNode, referenceNode, labelmapNode=None, colorNo
 p = "/Users/pieper/slicer/latest/SlicerMorph/SlicerMorph/SegmentationRendering/SegmentationRendering.py"
 exec(open(p).read())
 
+s = getNode("Segmentation")
+r = getNode("MRHead")
+makeVectorVolume(s,r)
+
   """
 
   if not segmentationNode or not referenceNode:
@@ -306,7 +310,10 @@ exec(open(p).read())
   vectorArray = slicer.util.array(vectorNode.GetID())
   vectorArray.fill(0)
 
-  vectorArray[:,:,:,3] = 255 * referenceArray.astype('float32') / referenceArray.max()
+  referenceMin = referenceArray.min()
+  referenceRange = referenceArray.max() - referenceMin
+  referenceFloats = referenceArray.astype('float32')
+  vectorArray[:,:,:,3] = 255 * (referenceFloats - referenceMin) / referenceRange
   lookupTable = labelmapNode.GetDisplayNode().GetColorNode().GetLookupTable()
   rgb = [0]*3
   labels = numpy.unique(labelArray)
@@ -315,6 +322,10 @@ exec(open(p).read())
     labelMask[numpy.where(labelArray == label)] = 1
     lookupTable.GetColor(label, rgb)
     vectorArray[:,:,:,0:3] += (255 * numpy.asarray(rgb)).astype(vectorArray.dtype) * labelMask
+    segmentID = labelmapNode.GetDisplayNode().GetColorNode().GetColorName(label)
+    if not segmentationNode.GetDisplayNode().GetSegmentVisibility(segmentID):
+        vectorArray[:,:,:,3] *= (1 - labelMask[:,:,:,0])
+
 
   slicer.util.arrayFromVolumeModified(vectorNode)
 
@@ -323,6 +334,18 @@ exec(open(p).read())
   cast.SetOutputScalarTypeToUnsignedChar()
   cast.Update()
   vectorNode.SetAndObserveImageData(cast.GetOutputDataObject(0))
+
+  volumeRenderingLogic = slicer.modules.volumerendering.logic()
+  displayNode = volumeRenderingLogic.CreateDefaultVolumeRenderingNodes(vectorNode)
+  displayNode.SetVisibility(True)
+  # Enable direct RGBA color mapping
+  displayNode.GetVolumePropertyNode().GetVolumeProperty().SetIndependentComponents(False)
+
+  stopTime = time.time()
+  logging.info('Processing completed in {0:.2f} seconds'.format(stopTime-startTime))
+
+
+  return
 
   colors = vtk.vtkNamedColors()
 
@@ -341,7 +364,10 @@ exec(open(p).read())
   opacityTransferFunction = vtk.vtkPiecewiseFunction()
   opacityTransferFunction.RemoveAllPoints()
   opacityTransferFunction.AddPoint(12.5, 0.0)
-  opacityTransferFunction.AddPoint(255, 0.2)
+  opacityTransferFunction.AddPoint(255, 0.4)
+  """
+op = slicer.modules.renWin.GetRenderers().GetItemAsObject(0).GetVolumes().GetItemAsObject(0).GetProperty().GetScalarOpacity()
+  """
 
   # The property describes how the data will look.
   volumeProperty = vtk.vtkVolumeProperty()
@@ -356,7 +382,6 @@ exec(open(p).read())
   volumeMapper.SetInputData(vectorImage)
 
   volumeMapper.SetInputData(vectorNode.GetImageData())
-
   # The volume holds the mapper and the property and
   # can be used to position/orient the volume.
   volume = vtk.vtkVolume()
@@ -375,16 +400,6 @@ exec(open(p).read())
 
   slicer.modules.renWin = renWin
 
-
-  import vtkTeem
-  writer = vtkTeem.vtkTeemNRRDWriter()
-  writer.SetFileName("/tmp/VectorVolume.nrrd")
-  writer.SetInputData(vectorImage)
-  writer.Write()
-
-
-  stopTime = time.time()
-  logging.info('Processing completed in {0:.2f} seconds'.format(stopTime-startTime))
 
 #
 # SegmentationRenderingTest
