@@ -1,4 +1,8 @@
 
+import vtk
+import vtk.util
+import vtk.util.numpy_support
+
 #
 # create an elliposid volume and a blurred version of it
 #
@@ -135,4 +139,12 @@ lights.AddItem(light)
 
 renWin.SetSize(600, 600)
 renWin.Render()
+
+#
+# code can be either copy-pasted into Slicer console
+# or run in python3 with vtk pip installed
+try:
+    slicer
+except NameError:
+    iren.Start()
 
