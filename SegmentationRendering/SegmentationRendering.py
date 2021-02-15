@@ -1,7 +1,7 @@
 import os
 import unittest
 import logging
-import vtk, qt, ctk, slicer, numpy
+import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 
@@ -17,18 +17,71 @@ class SegmentationRendering(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "Segmentation Rendering"
-    self.parent.categories = ["Segmentations"]
+    self.parent.categories = ["SlicerMorph"]
     self.parent.dependencies = []
     self.parent.contributors = ["Steve Pieper (Isomics, Inc.)"]
     self.parent.helpText = """
-This module creates a vector volume where each voxel is a colored by any segment that covers is and the alpha value comes from the referenced volume.
+This module provides a volume rendering based alternative for visualizing Segmentations.
+See more information in <a href="https://github.com/SlicerMorph/SlicerMorph#SegmentationRendering">module documentation</a>.
 """
     self.parent.acknowledgementText = """
-Funded in part by the NSF Advances in Biological Informatics Collaborative grant to ABI-1759883
+Funded by the SlicerMorph project.
 
-This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc., Andras Lasso, PerkLab,
+This file is based on a template originally developed by Jean-Christophe Fillion-Robin, Kitware Inc., Andras Lasso, PerkLab,
 and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR013218-12S1.
 """
+
+    # Additional initialization step after application startup is complete
+    slicer.app.connect("startupCompleted()", registerSampleData)
+
+#
+# Register sample data sets in Sample Data module
+#
+
+def registerSampleData():
+  """
+  Add data sets to Sample Data module.
+  """
+  # It is always recommended to provide sample data for users to make it easy to try the module,
+  # but if no sample data is available then this method (and associated startupCompeted signal connection) can be removed.
+
+  import SampleData
+  iconsPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons')
+
+  # To ensure that the source code repository remains small (can be downloaded and installed quickly)
+  # it is recommended to store data sets that are larger than a few MB in a Github release.
+
+  # SegmentationRendering1
+  SampleData.SampleDataLogic.registerCustomSampleDataSource(
+    # Category and sample name displayed in Sample Data module
+    category='SegmentationRendering',
+    sampleName='SegmentationRendering1',
+    # Thumbnail should have size of approximately 260x280 pixels and stored in Resources/Icons folder.
+    # It can be created by Screen Capture module, "Capture all views" option enabled, "Number of images" set to "Single".
+    thumbnailFileName=os.path.join(iconsPath, 'SegmentationRendering1.png'),
+    # Download URL and target file name
+    uris="https://github.com/Slicer/SlicerTestingData/releases/download/SHA256/998cb522173839c78657f4bc0ea907cea09fd04e44601f17c82ea27927937b95",
+    fileNames='SegmentationRendering1.nrrd',
+    # Checksum to ensure file integrity. Can be computed by this command:
+    #  import hashlib; print(hashlib.sha256(open(filename, "rb").read()).hexdigest())
+    checksums = 'SHA256:998cb522173839c78657f4bc0ea907cea09fd04e44601f17c82ea27927937b95',
+    # This node name will be used when the data set is loaded
+    nodeNames='SegmentationRendering1'
+  )
+
+  # SegmentationRendering2
+  SampleData.SampleDataLogic.registerCustomSampleDataSource(
+    # Category and sample name displayed in Sample Data module
+    category='SegmentationRendering',
+    sampleName='SegmentationRendering2',
+    thumbnailFileName=os.path.join(iconsPath, 'SegmentationRendering2.png'),
+    # Download URL and target file name
+    uris="https://github.com/Slicer/SlicerTestingData/releases/download/SHA256/1a64f3f422eb3d1c9b093d1a18da354b13bcf307907c66317e2463ee530b7a97",
+    fileNames='SegmentationRendering2.nrrd',
+    checksums = 'SHA256:1a64f3f422eb3d1c9b093d1a18da354b13bcf307907c66317e2463ee530b7a97',
+    # This node name will be used when the data set is loaded
+    nodeNames='SegmentationRendering2'
+  )
 
 #
 # SegmentationRenderingWidget
@@ -79,9 +132,10 @@ class SegmentationRenderingWidget(ScriptedLoadableModuleWidget, VTKObservationMi
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
     self.ui.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.referenceSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
     self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    self.ui.imageThresholdSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.ui.invertOutputCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.ui.invertedOutputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
 
     # Buttons
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
@@ -133,14 +187,11 @@ class SegmentationRenderingWidget(ScriptedLoadableModuleWidget, VTKObservationMi
 
     self.setParameterNode(self.logic.getParameterNode())
 
-    # TODO
-    """
     # Select default input nodes if nothing is selected yet to save a few clicks for the user
     if not self._parameterNode.GetNodeReference("InputVolume"):
       firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
       if firstVolumeNode:
         self._parameterNode.SetNodeReferenceID("InputVolume", firstVolumeNode.GetID())
-    """
 
   def setParameterNode(self, inputParameterNode):
     """
@@ -175,11 +226,12 @@ class SegmentationRenderingWidget(ScriptedLoadableModuleWidget, VTKObservationMi
     # Make sure GUI changes do not call updateParameterNodeFromGUI (it could cause infinite loop)
     self._updatingGUIFromParameterNode = True
 
-    # TODO
-    """
     # Update node selectors and sliders
     self.ui.inputSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputVolume"))
     self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolume"))
+    self.ui.invertedOutputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolumeInverse"))
+    self.ui.imageThresholdSliderWidget.value = float(self._parameterNode.GetParameter("Threshold"))
+    self.ui.invertOutputCheckBox.checked = (self._parameterNode.GetParameter("Invert") == "true")
 
     # Update buttons states and tooltips
     if self._parameterNode.GetNodeReference("InputVolume") and self._parameterNode.GetNodeReference("OutputVolume"):
@@ -188,7 +240,6 @@ class SegmentationRenderingWidget(ScriptedLoadableModuleWidget, VTKObservationMi
     else:
       self.ui.applyButton.toolTip = "Select input and output volume nodes"
       self.ui.applyButton.enabled = False
-    """
 
     # All the GUI updates are done
     self._updatingGUIFromParameterNode = False
@@ -206,6 +257,9 @@ class SegmentationRenderingWidget(ScriptedLoadableModuleWidget, VTKObservationMi
 
     self._parameterNode.SetNodeReferenceID("InputVolume", self.ui.inputSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID("OutputVolume", self.ui.outputSelector.currentNodeID)
+    self._parameterNode.SetParameter("Threshold", str(self.ui.imageThresholdSliderWidget.value))
+    self._parameterNode.SetParameter("Invert", "true" if self.ui.invertOutputCheckBox.checked else "false")
+    self._parameterNode.SetNodeReferenceID("OutputVolumeInverse", self.ui.invertedOutputSelector.currentNodeID)
 
     self._parameterNode.EndModify(wasModified)
 
@@ -216,7 +270,14 @@ class SegmentationRenderingWidget(ScriptedLoadableModuleWidget, VTKObservationMi
     try:
 
       # Compute output
-      self.logic.process(self.ui.inputSelector.currentNode(), self.ui.outputSelector.currentNode())
+      self.logic.process(self.ui.inputSelector.currentNode(), self.ui.outputSelector.currentNode(),
+        self.ui.imageThresholdSliderWidget.value, self.ui.invertOutputCheckBox.checked)
+
+      # Compute inverted output (if needed)
+      if self.ui.invertedOutputSelector.currentNode():
+        # If additional output volume is selected then result with inverted threshold is written there
+        self.logic.process(self.ui.inputSelector.currentNode(), self.ui.invertedOutputSelector.currentNode(),
+          self.ui.imageThresholdSliderWidget.value, not self.ui.invertOutputCheckBox.checked, showResult=False)
 
     except Exception as e:
       slicer.util.errorDisplay("Failed to compute results: "+str(e))
@@ -250,156 +311,40 @@ class SegmentationRenderingLogic(ScriptedLoadableModuleLogic):
     """
     if not parameterNode.GetParameter("Threshold"):
       parameterNode.SetParameter("Threshold", "100.0")
+    if not parameterNode.GetParameter("Invert"):
+      parameterNode.SetParameter("Invert", "false")
 
-def makeVectorVolume(segmentationNode, referenceNode, labelmapNode=None, colorNode=None, vectorNode=None):
-  """
-  Create the vector volume based on the segmentation and reference.
-  Can be used without GUI widget.
-  :param segmentationNode: to be used
-  :param referenceNode: defines vector volume geometry and alpha
-  :param labelmapNode: used as an intermediate value, will be create if None
-  :param colorNode: used as an intermediate value, will be create if None
-  :param vectorNode: result, new will be created if None
-  """
+  def process(self, inputVolume, outputVolume, imageThreshold, invert=False, showResult=True):
+    """
+    Run the processing algorithm.
+    Can be used without GUI widget.
+    :param inputVolume: volume to be thresholded
+    :param outputVolume: thresholding result
+    :param imageThreshold: values above/below this threshold will be set to 0
+    :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
+    :param showResult: show output volume in slice viewers
+    """
 
-  """
-p = "/Users/pieper/slicer/latest/SlicerMorph/SlicerMorph/SegmentationRendering/SegmentationRendering.py"
-exec(open(p).read())
+    if not inputVolume or not outputVolume:
+      raise ValueError("Input or output volume is invalid")
 
-s = getNode("Segmentation")
-r = getNode("MRHead")
-makeVectorVolume(s,r)
+    import time
+    startTime = time.time()
+    logging.info('Processing started')
 
-  """
+    # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
+    cliParams = {
+      'InputVolume': inputVolume.GetID(),
+      'OutputVolume': outputVolume.GetID(),
+      'ThresholdValue' : imageThreshold,
+      'ThresholdType' : 'Above' if invert else 'Below'
+      }
+    cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
+    # We don't need the CLI module node anymore, remove it to not clutter the scene with it
+    slicer.mrmlScene.RemoveNode(cliNode)
 
-  if not segmentationNode or not referenceNode:
-    raise ValueError("input is invalid")
-
-  import time
-  startTime = time.time()
-  logging.info('Processing started')
-
-  import vtkSlicerSegmentationsModuleLogicPython as vtkSlicerSegmentationsModuleLogic
-  logic = vtkSlicerSegmentationsModuleLogic.vtkSlicerSegmentationsModuleLogic()
-
-  segmentIDs = vtk.vtkStringArray()
-  segmentationNode.GetSegmentation().GetSegmentIDs(segmentIDs)
-
-  if not labelmapNode:
-    labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
-  if not vectorNode:
-    vectorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode")
-
-  referenceImage = referenceNode.GetImageData()
-  vectorImage = vtk.vtkImageData()
-  vectorImage.SetDimensions(referenceImage.GetDimensions())
-  vectorImage.AllocateScalars(referenceImage.GetScalarType(), 4)
-  vectorNode.SetAndObserveImageData(vectorImage)
-  ijkToRAS = vtk.vtkMatrix4x4()
-  referenceNode.GetIJKToRASMatrix(ijkToRAS)
-  vectorNode.SetIJKToRASMatrix(ijkToRAS)
-
-
-  success = logic.ExportSegmentsToLabelmapNode(segmentationNode, segmentIDs, labelmapNode, referenceNode, slicer.vtkSegmentation.EXTENT_REFERENCE_GEOMETRY)
-
-  if not success:
-    return None
-
-  referenceArray = slicer.util.array(referenceNode.GetID())
-  labelArray = slicer.util.array(labelmapNode.GetID())
-  vectorArray = slicer.util.array(vectorNode.GetID())
-  vectorArray.fill(0)
-
-  referenceMin = referenceArray.min()
-  referenceRange = referenceArray.max() - referenceMin
-  referenceFloats = referenceArray.astype('float32')
-  vectorArray[:,:,:,3] = 255 * (referenceFloats - referenceMin) / referenceRange
-  lookupTable = labelmapNode.GetDisplayNode().GetColorNode().GetLookupTable()
-  rgb = [0]*3
-  labels = numpy.unique(labelArray)
-  for label in labels:
-    labelMask = numpy.zeros(vectorArray[:,:,:,0:3].shape, dtype=vectorArray.dtype)
-    labelMask[numpy.where(labelArray == label)] = 1
-    lookupTable.GetColor(label, rgb)
-    vectorArray[:,:,:,0:3] += (255 * numpy.asarray(rgb)).astype(vectorArray.dtype) * labelMask
-    segmentID = labelmapNode.GetDisplayNode().GetColorNode().GetColorName(label)
-    if not segmentationNode.GetDisplayNode().GetSegmentVisibility(segmentID):
-        vectorArray[:,:,:,3] *= (1 - labelMask[:,:,:,0])
-
-
-  slicer.util.arrayFromVolumeModified(vectorNode)
-
-  cast = vtk.vtkImageCast()
-  cast.SetInputData(vectorNode.GetImageData())
-  cast.SetOutputScalarTypeToUnsignedChar()
-  cast.Update()
-  vectorNode.SetAndObserveImageData(cast.GetOutputDataObject(0))
-
-  volumeRenderingLogic = slicer.modules.volumerendering.logic()
-  displayNode = volumeRenderingLogic.CreateDefaultVolumeRenderingNodes(vectorNode)
-  displayNode.SetVisibility(True)
-  # Enable direct RGBA color mapping
-  displayNode.GetVolumePropertyNode().GetVolumeProperty().SetIndependentComponents(False)
-
-  stopTime = time.time()
-  logging.info('Processing completed in {0:.2f} seconds'.format(stopTime-startTime))
-
-
-  return
-
-  colors = vtk.vtkNamedColors()
-
-  # Create the standard renderer, render window
-  # and interactor.
-  ren1 = vtk.vtkRenderer()
-
-  renWin = vtk.vtkRenderWindow()
-  renWin.AddRenderer(ren1)
-
-  iren = vtk.vtkRenderWindowInteractor()
-  iren.SetRenderWindow(renWin)
-  #iren.GetInteractorStyle().SetCurrentStyleToTrackballActor()
-
-  # Create transfer mapping scalar value to opacity.
-  opacityTransferFunction = vtk.vtkPiecewiseFunction()
-  opacityTransferFunction.RemoveAllPoints()
-  opacityTransferFunction.AddPoint(12.5, 0.0)
-  opacityTransferFunction.AddPoint(255, 0.4)
-  """
-op = slicer.modules.renWin.GetRenderers().GetItemAsObject(0).GetVolumes().GetItemAsObject(0).GetProperty().GetScalarOpacity()
-  """
-
-  # The property describes how the data will look.
-  volumeProperty = vtk.vtkVolumeProperty()
-  volumeProperty.SetScalarOpacity(opacityTransferFunction)
-  #volumeProperty.ShadeOn()
-  volumeProperty.IndependentComponentsOff()
-  volumeProperty.SetInterpolationTypeToLinear()
-
-  # The mapper / ray cast function know how to render the data.
-  volumeMapper = vtk.vtkFixedPointVolumeRayCastMapper()
-  volumeMapper = vtk.vtkSmartVolumeMapper()
-  volumeMapper.SetInputData(vectorImage)
-
-  volumeMapper.SetInputData(vectorNode.GetImageData())
-  # The volume holds the mapper and the property and
-  # can be used to position/orient the volume.
-  volume = vtk.vtkVolume()
-  volume.SetMapper(volumeMapper)
-  volume.SetProperty(volumeProperty)
-
-  ren1.AddVolume(volume)
-  ren1.SetBackground(colors.GetColor3d("Wheat"))
-  ren1.GetActiveCamera().Azimuth(45)
-  ren1.GetActiveCamera().Elevation(30)
-  ren1.ResetCameraClippingRange()
-  ren1.ResetCamera()
-
-  renWin.SetSize(600, 600)
-  renWin.Render()
-
-  slicer.modules.renWin = renWin
-
+    stopTime = time.time()
+    logging.info('Processing completed in {0:.2f} seconds'.format(stopTime-startTime))
 
 #
 # SegmentationRenderingTest
@@ -440,18 +385,68 @@ class SegmentationRenderingTest(ScriptedLoadableModuleTest):
     # Get/create input data
 
     import SampleData
-    inputVolume = SampleData.downloadMRHead()
+    registerSampleData()
+    inputVolume = SampleData.downloadSample('SegmentationRendering1')
     self.delayDisplay('Loaded test data set')
+
+    inputScalarRange = inputVolume.GetImageData().GetScalarRange()
+    self.assertEqual(inputScalarRange[0], 0)
+    self.assertEqual(inputScalarRange[1], 695)
+
+    outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    threshold = 100
+
+    # Test the module logic
 
     logic = SegmentationRenderingLogic()
 
-    # Test algorithm
-    """
-    logic.process(inputVolume, outputVolume, threshold)
+    # Test algorithm with non-inverted threshold
+    logic.process(inputVolume, outputVolume, threshold, True)
     outputScalarRange = outputVolume.GetImageData().GetScalarRange()
     self.assertEqual(outputScalarRange[0], inputScalarRange[0])
     self.assertEqual(outputScalarRange[1], threshold)
-    """
 
+    # Test algorithm with inverted threshold
+    logic.process(inputVolume, outputVolume, threshold, False)
+    outputScalarRange = outputVolume.GetImageData().GetScalarRange()
+    self.assertEqual(outputScalarRange[0], inputScalarRange[0])
+    self.assertEqual(outputScalarRange[1], inputScalarRange[1])
 
     self.delayDisplay('Test passed')
+
+"""
+
+path = "/Users/pieper/slicer/latest/SlicerMorph/SlicerMorph/SegmentationRendering/SegmentationRendering.py"
+exec(open(path).read())
+
+"""
+
+try:
+    slicer.util.getNode("4021-label")
+except slicer.util.MRMLNodeNotFoundException:
+    slicer.util.loadScene("/opt/data/SlicerMorph/segmented_skull.mrb")
+
+labelNode = slicer.util.getNode("4021-label")
+
+import SimpleITK as sitk
+
+
+
+
+TODO = """
+
+vectorNode = slicer.mrmlScene
+
+volumeRenderingLogic = slicer.modules.volumerendering.logic()
+volumeRenderingDisplayNode = volumeRenderingLogic.CreateDefaultVolumeRenderingNodes(vectorNode)
+volumeRenderingDisplayNode.SetVisibility(True)
+# Enable direct RGBA color mapping
+volumeRenderingDisplayNode.GetVolumePropertyNode().GetVolumeProperty().SetIndependentComponents(False)
+volumeRenderingDisplayNode.GetVolumePropertyNode().GetVolumeProperty().SetShade(True)
+shaderPropertyNode = slicer.vtkMRMLShaderPropertyNode()
+shaderPropertyNode.SetName("VectorVolumeShaderProperty")
+slicer.mrmlScene.AddNode(shaderPropertyNode)
+
+volumeRenderingDisplayNode.SetAndObserveShaderPropertyNodeID(shaderPropertyNode.GetID())
+"""
+
